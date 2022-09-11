@@ -1,0 +1,388 @@
+---
+title: "Exploring Ecommerce Trends of Pakistan from 2016-2018"
+author: "Zurnab SARFRAZ"
+date: "09/04/2022"
+output:
+  html_document:
+    toc_float: yes
+    number_sections: yes
+    toc: yes
+    theme: flatly
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+number_sections: yes
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+```
+
+*Uploading the dataset for review*
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(janitor)
+library(stringr)
+library(lubridate)
+library(lattice)
+library(gridExtra)
+
+
+pk <- read.csv("C:/Users/zurna/OneDrive/Desktop/NEOMA/Smester 2/Programing/Exam/Pk_ecommerce.csv", header = T, sep = ",")
+```
+
+*Cleaning the dataset*
+
+```{r}
+pk[22:26] <- NULL #removing last 5 blank columns
+
+
+pk <- pk %>% 
+  select(21,1:20) #bringing customer id column on 1st place
+
+pk[c(9,11,14,15,8,17,18,19,20,21)] <- NULL #removing variables that are of no use
+
+pk<- clean_names(pk)
+
+```
+
+*Preparing the dataset*
+
+```{r}
+# fixing the status category for dual meaning categories
+pk <- pk %>%
+  mutate(status = ifelse(status=='received','complete', status)) %>%
+  mutate(status = ifelse(status=='closed','complete', status)) %>%
+  mutate(status = ifelse(status=='exchange','complete', status)) %>%
+  mutate(status = ifelse(status=='order_refunded','refund', status)) %>%
+  mutate(status = ifelse(status=='paid','complete',status)) %>%
+  mutate(status = ifelse(status=='cod','complete', status)) %>%
+  mutate(status = ifelse(status=='pending_paypal','pending',status)) %>%
+  mutate(status = ifelse(status=="",NA,status)) %>%
+  mutate(status = ifelse(status=="\\N",NA, status)) %>%
+  mutate(category_name_1 = ifelse(category_name_1 =='\\N',NA,category_name_1)) %>%
+  mutate(category_name_1 = ifelse(category_name_1 =='',NA,category_name_1)) %>%
+  mutate(status = ifelse(status=='payment_review','processing',status)) %>%
+  mutate(payment_method = ifelse(payment_method == 'cashatdoorstep','cod',payment_method))
+  
+
+
+```
+
+*removing unnecessary empty rows and also changing data types*
+
+```{r}
+
+
+pk <- pk %>% 
+  mutate(customer_id = as.numeric(customer_id)) %>% 
+  mutate(mv = str_squish(mv)) %>%
+  mutate(mv = str_replace_all(mv,"[[:punct:]]", "")) %>%
+  mutate(mv = as.numeric(mv)) %>%
+  mutate(created_at = mdy(created_at))
+
+pk <- pk %>%
+  filter(!is.na(customer_id)) %>%
+  filter(price <400000) %>% #removing the outliers to avoid bias
+  filter(mv < 800000) %>%   #removing the outliers to avoid bias
+  filter(!is.na(category_name_1)) #removed NAs is category
+#had to remove half a million empty rows
+
+
+```
+
+*To remove any substantial outliers*
+
+```{r}
+boxplot(pk$price) 
+boxplot(pk$mv)
+
+```
+
+*Fixing categories names under the status column*
+
+```{r}
+
+pk$payment_method <- gsub("^(easypay|Easypay)\\_+\\w+", 'easypay',pk$payment_method)
+pk$payment_method <- gsub("^(Easypay)", 'easypay',pk$payment_method)
+pk$payment_method <- gsub("^(jazz)\\w+", 'jazz mobile payment',pk$payment_method)
+
+unique(pk$payment_method)
+
+```
+
+# Task
+
+*Top Categories With Respect To Revenue Generation & Order Frequency (to figure out what were the top revenue generating categories and which categories were prone to receive more orders. I could then compare the result with today's data for corroboration)*
+
+## Top Categories w.r.t Order Frequency
+
+```{r}
+top_categories_qty <- pk %>%
+  group_by(category_name_1) %>%
+  summarise(order = sum(qty_ordered)) %>%
+  arrange(desc(order))
+
+top_categories_qty
+```
+
+## Top Categories w.r.t Revenue (Pakistan's Currency)
+
+```{r}
+top_categories_revenue <- pk %>%
+  group_by(category_name_1) %>%
+  summarise(revenue = sum(mv)) %>%
+  arrange(desc(revenue))
+
+top_categories_revenue #in pkr
+```
+
+## Top Categories w.r.t Revenue (in \$)
+
+### Dollar conversion function from pkr to dollars
+
+```{r}
+dollar_conv <- function(x) {
+  category <- x[1]
+  dollar_today <- 185 #conversion today from dollar to pkr
+  revenue_dollar <- round(x[2]/dollar_today, digits = 0)
+  return(as.data.frame(c(category,revenue_dollar)))
+}
+
+  
+```
+
+```{r}
+top_categories_rev_dollar <- dollar_conv(top_categories_revenue)
+
+top_categories_rev_dollar
+```
+
+# Task
+
+*Top 5 Products in each respective category (What were the hot sellers in each respective category)*
+
+## Order Wise
+
+```{r}
+#Top 5 products in each category with respect to order frequency
+top_5_prod_vol <- pk %>%
+  group_by(category_name_1,sku) %>%
+  summarise(order = sum(qty_ordered)) %>%
+  arrange(desc(order))
+  
+
+top_5_prod_vol <- top_5_prod_vol %>% 
+  group_by(category_name_1) %>%
+  arrange(desc(category_name_1)) %>%
+  dplyr:: filter(row_number() <= 5) %>% 
+  ungroup
+
+top_5_prod_vol
+
+```
+
+## Revenue Wise (in PKR)
+
+```{r}
+#Top 5 products in each category with respect to revenue
+top_5_prod_rev <- pk %>%
+  group_by(category_name_1,sku) %>%
+  summarise(revenue = sum(mv)) %>%
+  arrange(desc(revenue))
+  
+
+top_5_prod_rev <- top_5_prod_rev %>% 
+  group_by(category_name_1) %>%
+  arrange(desc(category_name_1)) %>%
+  dplyr:: filter(row_number() <= 5) %>% 
+  ungroup
+
+View(top_5_prod_rev)
+
+```
+
+# Task
+
+*relation between payment methods and order status (to see if there's any relation between order status and payment method being used. As Pakistan is the cash economy, I want to see how was the market reacting to COD and bank/online/mobile transfers at that time)*
+
+```{r}
+x <- pk %>%
+  group_by(status,payment_method) %>%
+  filter(!is.na(status)) %>%
+  summarise(freq = n()) %>%
+  arrange(desc(freq)) %>%
+  filter(status == 'complete' | status == 'canceled')
+
+ggplot(x) + geom_bar(aes(x = payment_method, 
+               y = freq), 
+           stat = 'identity', fill = x$freq, legend = T) +
+  labs(x='Payment Options', y= 'Order Status - Number',title = "Status of complete & canceled orders w.r.t payment method") + 
+  facet_grid(~status) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
+  
+
+```
+
+# Task
+
+*Rank Categories on overall revenue generation with discounts and without discounts (if people are sensitive towards discounts or not or to what extent)*
+
+```{r}
+with_disc <- pk %>%
+  filter(discount_amount>0)
+  
+  
+no_disc <- pk %>%
+  filter(discount_amount==0)
+```
+
+## Revenue with discounts
+
+```{r}
+with_disc_sales <- with_disc %>% #in PKR
+  group_by(category_name_1) %>%
+  summarise(with_discounts_rev = sum(mv)) %>%
+  arrange(desc(with_discounts_rev))
+
+
+
+with_disc_sales_dollar <- dollar_conv(with_disc_sales) #in dollars
+
+```
+
+## Revenue without discounts
+
+```{r}
+no_disc_sales <- no_disc %>% #in PKR
+  group_by(category_name_1) %>%
+  summarise(no_discounts_rev = sum(mv)) %>%
+  arrange(desc(no_discounts_rev))
+  
+
+
+no_disc_sales_dollar <- dollar_conv(no_disc_sales) #in dollars
+
+```
+
+## Sales and Discounts Status Combined
+
+```{r}
+sales_discounts_status <- data.frame(with_disc_sales_dollar,no_disc_sales_dollar)
+names(sales_discounts_status)[1] <- 'categories'
+sales_discounts_status$category_name_1.1 <- NULL
+sales_discounts_status 
+
+
+```
+
+## Plot of Discount Sensitivity
+
+### plot 1
+
+```{r}
+
+ggplot(sales_discounts_status) + geom_point(aes(x = with_discounts_rev, 
+               y = no_discounts_rev)) +
+  labs(x='revenue with discount', y= 'revenue with no discount',title = "sales revenue with sensitivity to discounts status") + 
+  facet_grid(~categories) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 2, size = 10))
+```
+
+### plot 2
+
+```{r}
+ggplot(sales_discounts_status) + geom_point(aes(x = with_discounts_rev, 
+               y = no_discounts_rev)) +
+  labs(x='revenue with discount', y= 'revenue with no discount',title = "sales revenue with sensitivity to discounts status") + 
+  facet_grid(~categories) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 2, size = 10)) +
+  facet_wrap(categories~., scales = "free")
+```
+
+### plot 3
+
+```{r}
+lattice::dotplot(no_discounts_rev~with_discounts_rev|categories,data=sales_discounts_status)
+
+```
+
+# Task
+
+*Order frequency & Revenue for Apple and Samsung devices in 'mobile and tablet category' (which consumer electronics giant has a heavy foot in Pakistan in mobile & tablet category as per the given data. This would also indicate the socio economic situation of online buyers. i.e. relevant brands: Apple, Samsung, Huawei, HTC, Infinix, Xiaomi, Q Mobile)*
+
+## Hot Seller Mobiles W.r.t volume of orders
+
+```{r}
+hot_sellers_mobile_vol <- pk %>%
+  filter(category_name_1 == 'Mobiles & Tablets') %>%
+  select(5,8,7,11) %>% 
+  filter(grepl("Apple", sku, ignore.case=TRUE) | grepl("Samsung", sku, ignore.case=TRUE) |
+         grepl("Huawei", sku, ignore.case=TRUE) | grepl("HTC", sku, ignore.case=TRUE) |
+         grepl("Infinix", sku, ignore.case=TRUE) | grepl("Xiaomi", sku, ignore.case=TRUE) |
+         grepl("Q Mobile", sku, ignore.case=TRUE)) %>%
+  group_by(sku) %>%
+  summarise(orders = sum(qty_ordered)) %>%
+  arrange(desc(orders)) %>%
+  slice(1:20)
+hot_sellers_mobile_vol
+```
+
+## Hot Seller Mobiles W.r.t revenue (in \$)
+
+```{r}
+hot_sellers_mobile_rev_pk <- pk %>%
+  filter(category_name_1 == 'Mobiles & Tablets') %>%
+  select(5,8,7,11) %>% 
+  filter(grepl("Apple", sku, ignore.case=TRUE) | grepl("Samsung", sku, ignore.case=TRUE) |
+         grepl("Huawei", sku, ignore.case=TRUE) | grepl("HTC", sku, ignore.case=TRUE) |
+         grepl("Infinix", sku, ignore.case=TRUE) | grepl("Xiaomi", sku, ignore.case=TRUE) |
+         grepl("Q Mobile", sku, ignore.case=TRUE)) %>%
+  group_by(sku) %>%
+  summarise(revenue = sum(mv)) %>%
+  arrange(desc(revenue)) %>%
+  slice(1:20)
+ 
+
+
+
+
+hot_sellers_mobile_dollar <- dollar_conv(hot_sellers_mobile_rev_pk)
+hot_sellers_mobile_dollar
+
+
+
+```
+
+## Plot of Hot Sellers w.r.t Qty & Revenue
+
+```{r}
+top_5_vol <- slice_head(hot_sellers_mobile_vol, n = 5)
+
+p1_vol <- ggplot(top_5_vol, aes(x = sku, y = orders)) +
+  geom_point() +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 10)) +
+  labs(x='Name of Phones', y= 'Order Frequency of Top 5',title = "Top 5 Phones w.r.t Qty Ordered")
+
+
+
+top_5_rev <- slice_head(hot_sellers_mobile_dollar, n = 5)
+
+p2_rev <- ggplot(top_5_rev, aes(x = sku, y = revenue)) +
+  geom_point() +
+  theme(
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 10)) +
+  labs(x='Name of Phones', y= 'Revenue of Top 5',title = "Top 5 Phones w.r.t Qty Ordered")
+
+
+grid.arrange(p1_vol,p2_rev, ncol=2)
+```
